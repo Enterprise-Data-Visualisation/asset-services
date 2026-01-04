@@ -152,6 +152,6 @@ const server = new ApolloServer({
     }
 });
 
-server.listen({ port: 4001 }).then(({ url }) => {
+server.listen({ port: process.env.PORT || 4001 }).then(({ url }) => {
     console.log(`🚀 Asset Service V3 (Port 4001) ready at ${url}`);
 });
