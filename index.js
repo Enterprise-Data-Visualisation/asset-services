@@ -52,77 +52,61 @@ const typeDefs = gql`
   }
 `;
 
-// Dummy Data
-const db = [
-    // Sites
-    { id: 'site-1', name: 'Texas Refinery', type: 'Site', parentId: null },
-    { id: 'site-2', name: 'Louisiana Chemical', type: 'Site', parentId: null },
+const { supabase } = require('./db');
 
-    // Plants
-    { id: 'plant-1', name: 'Plant Alpha', type: 'Plant', parentId: 'site-1' },
-    { id: 'plant-2', name: 'Plant Beta', type: 'Plant', parentId: 'site-1' },
-    { id: 'plant-3', name: 'Plant Gamma', type: 'Plant', parentId: 'site-2' },
-
-    // Trains
-    { id: 'train-1', name: 'Train 101', type: 'Train', parentId: 'plant-1' },
-    { id: 'train-2', name: 'Train 102', type: 'Train', parentId: 'plant-1' },
-
-    // Units
-    { id: 'unit-1', name: 'Crude Unit', type: 'Unit', parentId: 'train-1' },
-    { id: 'unit-2', name: 'Vacuum Unit', type: 'Unit', parentId: 'train-1' },
-
-    // Signal Containers
-    { id: 'cont-1', name: 'Temperature Sensors', type: 'Signal Container', parentId: 'unit-1' },
-    { id: 'cont-2', name: 'Pressure Sensors', type: 'Signal Container', parentId: 'unit-1' },
-
-    // Signals
-    { id: 'sig-1', name: 'TI-1001 Inlet Temp', type: 'Signal', parentId: 'cont-1' },
-    { id: 'sig-2', name: 'TI-1002 Outlet Temp', type: 'Signal', parentId: 'cont-1' },
-    { id: 'sig-3', name: 'PI-2001 Header Press', type: 'Signal', parentId: 'cont-2' },
-    { id: 'sig-4', name: 'PI-2002 Suction Press', type: 'Signal', parentId: 'cont-2' },
-];
-
-// Snapshot Storage (In-Memory)
-let snapshots = [];
-
+// Resolvers
 const resolvers = {
     Asset: {
-        children: (parent) => {
-            // Return children for this parent
-            return db.filter(asset => asset.parentId === parent.id);
+        children: async (parent) => {
+            const { data } = await supabase.from('assets').select('*').eq('parentId', parent.id);
+            return data;
         },
     },
     Query: {
-        assets: (_, { parentId }) => {
-            // If parentId is provided, filter by it. If null, return items with no parent (Sites).
-            return db.filter(asset => asset.parentId === (parentId || null));
+        assets: async (_, { parentId }) => {
+            let query = supabase.from('assets').select('*');
+            if (parentId) {
+                query = query.eq('parentId', parentId);
+            } else {
+                query = query.is('parentId', null);
+            }
+            const { data } = await query;
+            return data;
         },
-        searchAssets: (_, { query }) => {
+        searchAssets: async (_, { query }) => {
             if (!query) return [];
-            const lowerQ = query.toLowerCase();
-            // Simple fuzzy search (substring)
-            return db.filter(asset => asset.name.toLowerCase().includes(lowerQ));
+            const { data } = await supabase.from('assets').select('*').ilike('name', `%${query}%`);
+            return data;
         },
-        getAsset: (_, { id }) => {
-            return db.find(asset => asset.id === id);
+        getAsset: async (_, { id }) => {
+            const { data } = await supabase.from('assets').select('*').eq('id', id).single();
+            return data;
         },
-        getAssetPath: (_, { id }) => {
+        getAssetPath: async (_, { id }) => {
             const path = [];
-            let current = db.find(a => a.id === id);
-            while (current) {
-                path.unshift(current);
-                current = db.find(a => a.id === current.parentId);
+            let currentId = id;
+
+            // Iteratively fetch parents (Max depth 5 for safety)
+            for (let i = 0; i < 5; i++) {
+                if (!currentId) break;
+                const { data } = await supabase.from('assets').select('*').eq('id', currentId).single();
+                if (!data) break;
+                path.unshift(data);
+                currentId = data.parentId;
             }
             return path;
         },
-        getAssetsByIds: (_, { ids }) => {
-            console.log('getAssetsByIds called with:', ids);
-            return db.filter(asset => ids.includes(asset.id));
+        getAssetsByIds: async (_, { ids }) => {
+            const { data } = await supabase.from('assets').select('*').in('id', ids);
+            return data;
         },
-        snapshots: () => snapshots,
+        snapshots: async () => {
+            const { data } = await supabase.from('snapshots').select('*').order('createdAt', { ascending: false });
+            return data;
+        },
     },
     Mutation: {
-        saveSnapshot: (_, { name, activeSignalIds, hiddenSignalIds, dateRange, customColors }) => {
+        saveSnapshot: async (_, { name, activeSignalIds, hiddenSignalIds, dateRange, customColors }) => {
             const newSnapshot = {
                 id: `snap-${Date.now()}`,
                 name,
@@ -132,13 +116,13 @@ const resolvers = {
                 dateRange,
                 customColors
             };
-            snapshots.push(newSnapshot);
-            return newSnapshot;
+            const { data, error } = await supabase.from('snapshots').insert(newSnapshot).select().single();
+            if (error) throw new Error(error.message);
+            return data;
         },
-        deleteSnapshot: (_, { id }) => {
-            const initialLength = snapshots.length;
-            snapshots = snapshots.filter(s => s.id !== id);
-            return snapshots.length < initialLength;
+        deleteSnapshot: async (_, { id }) => {
+            const { error } = await supabase.from('snapshots').delete().eq('id', id);
+            return !error;
         }
     }
 };
