@@ -148,7 +148,7 @@ const server = new ApolloServer({
     resolvers,
     cors: {
         origin: '*',
-        credentials: true,
+        credentials: false,
     }
 });
 
